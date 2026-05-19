@@ -29,11 +29,11 @@ defmodule LivebookTools.CLI do
             get_livemd_outputs(file_path)
 
           [] ->
-            IO.puts("Error: Missing file path for get_livemd_outputs command\n")
+            IO.write(:stderr, "Error: Missing file path for get_livemd_outputs command\n\n")
             print_help()
 
           _ ->
-            IO.puts("Error: Too many arguments for get_livemd_outputs command\n")
+            IO.write(:stderr, "Error: Too many arguments for get_livemd_outputs command\n\n")
             print_help()
         end
 
@@ -43,11 +43,11 @@ defmodule LivebookTools.CLI do
             watch(file_path)
 
           [] ->
-            IO.puts("Error: Missing file path for watch command\n")
+            IO.write(:stderr, "Error: Missing file path for watch command\n\n")
             print_help()
 
           _ ->
-            IO.puts("Error: Too many arguments for watch command\n")
+            IO.write(:stderr, "Error: Too many arguments for watch command\n\n")
             print_help()
         end
 
@@ -57,11 +57,11 @@ defmodule LivebookTools.CLI do
             run(file_path, argv)
 
           [] ->
-            IO.puts("Error: Missing file path for run command\n")
+            IO.write(:stderr, "Error: Missing file path for run command\n\n")
             print_help()
 
           _ ->
-            IO.puts("Error: Too many arguments for run command\n")
+            IO.write(:stderr, "Error: Too many arguments for run command\n\n")
             print_help()
         end
 
@@ -71,24 +71,24 @@ defmodule LivebookTools.CLI do
             convert(input_path, output_path)
 
           [_] ->
-            IO.puts("Error: Missing output path for convert command\n")
+            IO.write(:stderr, "Error: Missing output path for convert command\n\n")
             print_help()
 
           [] ->
-            IO.puts("Error: Missing file paths for convert command\n")
+            IO.write(:stderr, "Error: Missing file paths for convert command\n\n")
             print_help()
 
           _ ->
-            IO.puts("Error: Too many arguments for convert command\n")
+            IO.write(:stderr, "Error: Too many arguments for convert command\n\n")
             print_help()
         end
 
       {_, []} ->
-        IO.puts("Error: No command specified\n")
+        IO.write(:stderr, "Error: No command specified\n\n")
         print_help()
 
       {_, [cmd | _]} ->
-        IO.puts("Error: Unknown command '#{cmd}'\n")
+        IO.write(:stderr, "Error: Unknown command '#{cmd}'\n\n")
         print_help()
     end
   end
@@ -122,7 +122,14 @@ defmodule LivebookTools.CLI do
       after
         0 ->
           File.rm!(tmp_file_path)
-          IO.puts(IO.ANSI.red() <> "Error executing #{file_path}, error printed above" <> IO.ANSI.reset())
+
+          IO.write(
+            IO.ANSI.red() <>
+              "Error executing #{file_path}, error printed above" <>
+              IO.ANSI.reset() <>
+              "\n"
+          )
+
           System.halt(1)
       end
     end
@@ -141,10 +148,10 @@ defmodule LivebookTools.CLI do
 
     # Make sure that we can connect to the Livebook session for this file, will exit if not
     with_livebook_session(file_path, fn _livebook_pid ->
-      IO.puts("Connected to Livebook session for #{file_path} ")
+      IO.write("Connected to Livebook session for #{file_path} \n")
     end)
 
-    IO.puts("Watching #{file_path} for changes...")
+    IO.write("Watching #{file_path} for changes...\n")
 
     LivebookTools.Watcher.start_link(file_path, fn file_path ->
       Logger.info("File #{file_path} changed, syncing...")
@@ -168,23 +175,23 @@ defmodule LivebookTools.CLI do
 
       case File.write(output_path, exs_content) do
         :ok ->
-          IO.puts("Successfully converted #{input_path} to #{output_path}")
+          IO.write("Successfully converted #{input_path} to #{output_path}\n")
 
         {:error, reason} ->
-          IO.puts("Error writing to #{output_path}: #{:file.format_error(reason)}")
+          IO.write(:stderr, "Error writing to #{output_path}: #{:file.format_error(reason)}\n")
           System.halt(1)
       end
     else
       {:error, :enoent} ->
-        IO.puts("Error: File #{input_path} not found")
+        IO.write(:stderr, "Error: File #{input_path} not found\n")
         System.halt(1)
 
       {:error, reason} ->
-        IO.puts("Error reading #{input_path}: #{:file.format_error(reason)}")
+        IO.write(:stderr, "Error reading #{input_path}: #{:file.format_error(reason)}\n")
         System.halt(1)
 
       _ ->
-        IO.puts("Error: Failed to parse Livebook file #{input_path}")
+        IO.write(:stderr, "Error: Failed to parse Livebook file #{input_path}\n")
         System.halt(1)
     end
   end
@@ -206,7 +213,7 @@ defmodule LivebookTools.CLI do
 
     with_livebook_session(file_path, fn livebook_pid ->
       outputs = LivebookTools.Sync.get_livemd_outputs(livebook_pid)
-      IO.puts(outputs)
+      IO.write(outputs)
     end)
   end
 
@@ -215,15 +222,38 @@ defmodule LivebookTools.CLI do
   ############################################################
 
   defp ensure_node_started do
-    rand_str = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
-    node_name = String.to_atom("livebook_tools_#{rand_str}@127.0.0.1")
-    Node.start(node_name)
-    secret = String.to_atom(System.get_env("LIVEBOOK_COOKIE", "secret"))
-    Node.set_cookie(Node.self(), secret)
+    # Only start if not already distributed
+    if Node.self() == :nonode@nohost do
+      rand_str = :crypto.strong_rand_bytes(16) |> Base.url_encode64(padding: false)
+      node_name = :erlang.binary_to_atom("livebook_tools_#{rand_str}@127.0.0.1", :utf8)
+
+      case Node.start(node_name) do
+        {:ok, _} ->
+          :ok
+
+        {:error, {:already_started, _}} ->
+          :ok
+
+        error ->
+          IO.write(:stderr, "Warning: Could not start distributed node: #{inspect(error)}\n")
+      end
+    end
+
+    if Node.self() != :nonode@nohost do
+      cookie =
+        "LIVEBOOK_COOKIE"
+        |> System.get_env("secret")
+        |> then(&:erlang.binary_to_atom(&1, :utf8))
+
+      Node.set_cookie(cookie)
+    end
   end
 
   defp with_livebook_session(file_path, success_fn) do
-    livebook_node = System.get_env("LIVEBOOK_NODE", "livebook@127.0.0.1") |> String.to_atom()
+    livebook_node =
+      "LIVEBOOK_NODE"
+      |> System.get_env("livebook@127.0.0.1")
+      |> then(&:erlang.binary_to_atom(&1, :utf8))
 
     with {:ok, discovered_node} <- LivebookTools.Sync.discover_livebook_node(),
          true <- discovered_node == livebook_node || {:error, :wrong_node, discovered_node},
@@ -233,7 +263,7 @@ defmodule LivebookTools.CLI do
       success_fn.(livebook_pid)
     else
       {:error, :no_livebook_node} ->
-        IO.puts("""
+        IO.write(:stderr, """
         Error: No livebook node found.
 
         Please make sure Livebook is running and the node name and cookie match your configuration.
@@ -249,7 +279,7 @@ defmodule LivebookTools.CLI do
         System.halt(1)
 
       {:error, :wrong_node, discovered_node} ->
-        IO.puts("""
+        IO.write(:stderr, """
         Error: Found a Livebook node, but it doesn't match your LIVEBOOK_NODE setting.
 
         Found: #{discovered_node}
@@ -261,7 +291,7 @@ defmodule LivebookTools.CLI do
         System.halt(1)
 
       {:error, :no_livebook_session} ->
-        IO.puts("""
+        IO.write(:stderr, """
         Error: No livebook session found for #{file_path}
 
         Make sure you open #{file_path} in Livebook before running this command.
@@ -270,7 +300,7 @@ defmodule LivebookTools.CLI do
         System.halt(1)
 
       false ->
-        IO.puts("""
+        IO.write(:stderr, """
         Error: Could not connect to Livebook node #{livebook_node}.
 
         Please make sure Livebook is running and the node name and cookie match your configuration.
@@ -288,7 +318,7 @@ defmodule LivebookTools.CLI do
   end
 
   defp print_help do
-    IO.puts("""
+    IO.write("""
     LivebookTools - Utilities for working with Livebook files
 
     Usage:

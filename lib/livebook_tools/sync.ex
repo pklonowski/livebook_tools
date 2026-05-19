@@ -28,43 +28,44 @@ defmodule LivebookTools.Sync do
   end
 
   def discover_livebook_node do
-    # Get all registered names from the Erlang Port Mapper Daemon
-    case :erl_epmd.names() do
-      {:ok, names} ->
-        discovered_node =
-          Enum.find_value(names, fn {name, _port} ->
-            node_name = "#{name}@127.0.0.1" |> String.to_atom()
-            was_connected = Node.list(:connected) |> Enum.member?(node_name)
+    # Honor explicit LIVEBOOK_NODE env var (most reliable)
+    if explicit_node = System.get_env("LIVEBOOK_NODE") do
+      node_name = String.to_atom(explicit_node)
 
-            case Node.connect(node_name) do
-              true ->
-                # Scan for Livebook processes
-                livebook_processes =
-                  :rpc.call(node_name, :erlang, :registered, [])
-                  |> Enum.filter(fn proc ->
-                    to_string(proc) =~ "Livebook.Session"
-                  end)
+      case Node.connect(node_name) do
+        true -> {:ok, node_name}
+        :ignored -> {:ok, node_name}
+        false -> {:error, :no_livebook_node}
+      end
+    else
+      # Original discovery logic with better handling
+      case :erl_epmd.names() do
+        {:ok, names} ->
+          discovered_node =
+            Enum.find_value(names, fn {name, _port} ->
+              node_name = :"#{name}@127.0.0.1"
 
-                # Disconnect if we weren't connected before
-                if not was_connected do
-                  Node.disconnect(node_name)
-                end
+              case Node.connect(node_name) do
+                true ->
+                  livebook_processes =
+                    :rpc.call(node_name, :erlang, :registered, [])
+                    |> Enum.filter(fn proc -> to_string(proc) =~ "Livebook.Session" end)
 
-                # Return the node if it has Livebook processes
-                if livebook_processes != [], do: node_name, else: nil
+                  if livebook_processes != [], do: node_name, else: nil
 
-              :ignored ->
-                nil
-            end
-          end)
+                _ ->
+                  nil
+              end
+            end)
 
-        case discovered_node do
-          nil -> {:error, :no_livebook_node}
-          discovered_node when is_atom(discovered_node) -> {:ok, discovered_node}
-        end
+          case discovered_node do
+            nil -> {:error, :no_livebook_node}
+            node_name -> {:ok, node_name}
+          end
 
-      {:error, reason} ->
-        raise "No livebook node found: #{inspect(reason)}"
+        {:error, _reason} ->
+          {:error, :no_livebook_node}
+      end
     end
   end
 
