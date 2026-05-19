@@ -96,20 +96,20 @@ defmodule LivebookTools.MCPServer do
 
   defp handle_request(%{"method" => "initialize", "id" => request_id}),
     do:
-    reply(%{
-      jsonrpc: "2.0",
-      id: request_id,
-      result: %{
-        protocolVersion: "2024-11-05",
-        capabilities: %{
-          tools: %{ listChanged: true }
-        },
-        serverInfo: %{
-          name: "LivebookTools MCP Server",
-          version: "0.0.1"
+      reply(%{
+        jsonrpc: "2.0",
+        id: request_id,
+        result: %{
+          protocolVersion: "2024-11-05",
+          capabilities: %{
+            tools: %{listChanged: true}
+          },
+          serverInfo: %{
+            name: "LivebookTools MCP Server",
+            version: "0.0.1"
+          }
         }
-      }
-    })
+      })
 
   defp handle_request(%{"method" => "notifications/initialized"}), do: :ok
 
