@@ -14,14 +14,15 @@ defmodule LivebookTools.MixProject do
 
   defp escript_config do
     [
-      main_module: LivebookTools.CLI
+      main_module: LivebookTools.CLI,
+      emu_args: "-epmd_module Elixir.LivebookTools.EPMD"
     ]
   end
 
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :iex],
+      extra_applications: [:logger, :iex]
     ]
   end
 

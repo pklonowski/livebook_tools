@@ -30,7 +30,7 @@ defmodule LivebookTools.Sync do
   def discover_livebook_node do
     # Honor explicit LIVEBOOK_NODE env var (most reliable)
     if explicit_node = System.get_env("LIVEBOOK_NODE") do
-      node_name = String.to_atom(explicit_node)
+      node_name = :erlang.binary_to_atom(explicit_node, :utf8)
 
       case Node.connect(node_name) do
         true -> {:ok, node_name}
@@ -38,32 +38,15 @@ defmodule LivebookTools.Sync do
         false -> {:error, :no_livebook_node}
       end
     else
-      # Original discovery logic with better handling
-      case :erl_epmd.names() do
-        {:ok, names} ->
-          discovered_node =
-            Enum.find_value(names, fn {name, _port} ->
-              node_name = :"#{name}@127.0.0.1"
-
-              case Node.connect(node_name) do
-                true ->
-                  livebook_processes =
-                    :rpc.call(node_name, :erlang, :registered, [])
-                    |> Enum.filter(fn proc -> to_string(proc) =~ "Livebook.Session" end)
-
-                  if livebook_processes != [], do: node_name, else: nil
-
-                _ ->
-                  nil
-              end
-            end)
-
-          case discovered_node do
-            nil -> {:error, :no_livebook_node}
-            node_name -> {:ok, node_name}
+      case LivebookTools.EPMD.find_livebook_node() do
+        {:ok, node_name} ->
+          case Node.connect(node_name) do
+            true -> {:ok, node_name}
+            :ignored -> {:ok, node_name}
+            false -> {:error, :no_livebook_node}
           end
 
-        {:error, _reason} ->
+        :error ->
           {:error, :no_livebook_node}
       end
     end

@@ -235,17 +235,29 @@ defmodule LivebookTools.CLI do
           :ok
 
         error ->
-          IO.write(:stderr, "Warning: Could not start distributed node: #{inspect(error)}\n")
+          IO.write(:stderr, """
+          Error: Could not start distributed Erlang node: #{inspect(error)}
+
+          This usually means epmd (Erlang Port Mapper Daemon) is not running.
+          Try starting it with:
+
+              epmd -daemon
+
+          Then retry your command.
+          """)
+
+          System.halt(1)
       end
     end
 
     if Node.self() != :nonode@nohost do
-      cookie =
-        "LIVEBOOK_COOKIE"
-        |> System.get_env("secret")
-        |> then(&:erlang.binary_to_atom(&1, :utf8))
+      case System.get_env("LIVEBOOK_COOKIE") do
+        nil ->
+          :ok
 
-      Node.set_cookie(cookie)
+        cookie_str ->
+          Node.set_cookie(:erlang.binary_to_atom(cookie_str, :utf8))
+      end
     end
   end
 
@@ -299,7 +311,7 @@ defmodule LivebookTools.CLI do
 
         System.halt(1)
 
-      false ->
+      result when result in [false, :ignored] ->
         IO.write(:stderr, """
         Error: Could not connect to Livebook node #{livebook_node}.
 
