@@ -194,9 +194,10 @@ defmodule LivebookTools.Sync do
 
   def sync(livebook_pid, file_path) do
     sync_notebook_name(livebook_pid, file_path)
-    sync_setup_cell(livebook_pid, file_path)
+    changed_setup = sync_setup_cell(livebook_pid, file_path)
     sync_sections(livebook_pid, file_path)
-    sync_cells(livebook_pid, file_path)
+    changed_cells = sync_cells(livebook_pid, file_path)
+    changed_setup ++ changed_cells
   end
 
   def sync_notebook_name(livebook_pid, file_path) do
@@ -232,6 +233,9 @@ defmodule LivebookTools.Sync do
 
     if new_setup_cell.source != current_setup_cell.source do
       update_cell(livebook_pid, current_setup_cell.id, new_setup_cell.source)
+      [current_setup_cell.id]
+    else
+      []
     end
   end
 
@@ -311,19 +315,22 @@ defmodule LivebookTools.Sync do
         Livebook.Session.delete_section(livebook_pid, current_section.id, false)
         []
     end)
-    |> Enum.each(fn
+    |> Enum.flat_map(fn
       {{:eq, {_current_cell, _new_cell}}, _section} ->
-        :ok
+        []
 
       {{:upd, {current_cell, new_cell}}, _section} ->
         update_cell(livebook_pid, current_cell.id, new_cell.source)
+        [current_cell.id]
 
       {{:ins, new_cell, before_cell}, section} ->
         before_cell_id = if before_cell, do: before_cell.id, else: nil
         insert_cell(livebook_pid, new_cell, section.id, before_cell_id)
+        []
 
       {{:del, current_cell}, _section} ->
         delete_cell(livebook_pid, current_cell.id)
+        []
 
       x ->
         raise "Unknown change: #{inspect(x)}"

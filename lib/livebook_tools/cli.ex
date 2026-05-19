@@ -38,9 +38,15 @@ defmodule LivebookTools.CLI do
         end
 
       {_, ["watch" | rest]} ->
-        case rest do
+        {watch_opts, watch_args, _} =
+          OptionParser.parse(rest,
+            strict: [rerun: :boolean, rerun_changed: :boolean],
+            aliases: [r: :rerun]
+          )
+
+        case watch_args do
           [file_path] ->
-            watch(file_path)
+            watch(file_path, watch_opts)
 
           [] ->
             IO.write(:stderr, "Error: Missing file path for watch command\n\n")
@@ -142,9 +148,16 @@ defmodule LivebookTools.CLI do
   @doc """
   Watches a Livebook file for changes and syncs it with an open Livebook session.
   """
-  def watch(file_path) do
+  def watch(file_path, opts \\ []) do
     ensure_node_started()
     file_path = Path.expand(file_path)
+
+    rerun_mode =
+      cond do
+        Keyword.get(opts, :rerun, false) -> :all
+        Keyword.get(opts, :rerun_changed, false) -> :changed
+        true -> :none
+      end
 
     # Make sure that we can connect to the Livebook session for this file, will exit if not
     with_livebook_session(file_path, fn _livebook_pid ->
@@ -157,8 +170,13 @@ defmodule LivebookTools.CLI do
       Logger.info("File #{file_path} changed, syncing...")
 
       with_livebook_session(file_path, fn livebook_pid ->
-        LivebookTools.Sync.sync(livebook_pid, file_path)
-        Livebook.Session.queue_full_evaluation(livebook_pid, [])
+        changed_ids = LivebookTools.Sync.sync(livebook_pid, file_path)
+
+        case rerun_mode do
+          :all -> Livebook.Session.queue_full_evaluation(livebook_pid, [])
+          :changed -> Livebook.Session.queue_full_evaluation(livebook_pid, changed_ids)
+          :none -> :ok
+        end
       end)
     end)
 
@@ -337,7 +355,10 @@ defmodule LivebookTools.CLI do
       livebook_tools [command] [options]
 
     Commands:
-      watch <file>              Watch a Livebook file for changes and sync with open Livebook session
+      watch <file> [--rerun | --rerun-changed]
+                                Watch a Livebook file for changes and sync with open Livebook session
+                                --rerun (-r):        re-run all cells after each sync
+                                --rerun-changed:     re-run only changed cells (and their dependents)
       run <file> [args]         Convert a Livebook file to an Elixir script and run it
       convert <input> <output>  Convert a Livebook file to an Elixir script and save it to the specified location
       mcp_server                Start the MCP server running over STDIO
