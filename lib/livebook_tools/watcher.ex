@@ -31,29 +31,34 @@ defmodule LivebookTools.Watcher do
 
     # If the file has changed, call the callback
     if file_changed?(last_info, current_info) do
-      callback.(file_path)
+      try do
+        callback.(file_path)
+      rescue
+        error -> Logger.error(Exception.format(:error, error, __STACKTRACE__))
+      end
     end
 
     # Schedule the next check
     schedule_check()
 
-    {:noreply, %{state | last_info: current_info}}
+    # Keep the last known content while the file is missing or empty
+    # (e.g. mid-write), so the next complete write is detected
+    {:noreply, %{state | last_info: current_info || last_info}}
   end
 
+  # mtime has a one second resolution, so two writes of the same size
+  # within one second would go unnoticed. Hashing the content is cheap
+  # for notebook-sized files and catches every change.
   defp get_file_info(file_path) do
-    case File.stat(file_path) do
-      {:ok, stat} -> stat
+    case File.read(file_path) do
+      {:ok, ""} -> nil
+      {:ok, content} -> :erlang.md5(content)
       {:error, _reason} -> nil
     end
   end
 
-  defp file_changed?(nil, _current_info), do: false
   defp file_changed?(_last_info, nil), do: false
-
-  defp file_changed?(last_info, current_info) do
-    last_info.mtime != current_info.mtime ||
-      last_info.size != current_info.size
-  end
+  defp file_changed?(last_info, current_info), do: last_info != current_info
 
   defp schedule_check do
     Process.send_after(self(), :check_file, @check_interval)

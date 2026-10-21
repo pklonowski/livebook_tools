@@ -193,6 +193,40 @@ defmodule LivebookTools.Sync do
   end
 
   def sync(livebook_pid, file_path) do
+    if native_sync_available?(livebook_pid) do
+      native_sync(livebook_pid)
+    else
+      legacy_sync(livebook_pid, file_path)
+    end
+  end
+
+  # Newer Livebook versions can sync a session from its file on their own,
+  # parsing the file with the matching Livebook version and correctly handling
+  # changes such as cell type changes and section insertions
+  defp native_sync_available?(livebook_pid) do
+    :rpc.call(node(livebook_pid), Kernel, :function_exported?, [
+      Livebook.Session,
+      :sync_file,
+      1
+    ]) == true
+  end
+
+  defp native_sync(livebook_pid) do
+    sources_before = cell_sources(livebook_pid)
+    GenServer.cast(livebook_pid, :sync_file)
+    # :sys.get_state is processed after the cast, so we see the synced state
+    sources_after = cell_sources(livebook_pid)
+
+    for {cell_id, source} <- sources_after,
+        Map.get(sources_before, cell_id) != source,
+        do: cell_id
+  end
+
+  defp cell_sources(livebook_pid) do
+    livebook_pid |> cells() |> Map.new(&{&1.id, &1.source})
+  end
+
+  def legacy_sync(livebook_pid, file_path) do
     sync_notebook_name(livebook_pid, file_path)
     changed_setup = sync_setup_cell(livebook_pid, file_path)
     sync_sections(livebook_pid, file_path)
