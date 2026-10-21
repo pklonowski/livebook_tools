@@ -29,7 +29,7 @@ defmodule LivebookTools.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:livebook, "~> 0.15.1", runtime: false}
+      {:livebook, "~> 0.19.10", runtime: false}
     ]
   end
 end

@@ -22,6 +22,9 @@ config :livebook,
 
 config :livebook, Livebook.Apps.Manager, retry_backoff_base_ms: 5_000
 
+# Required by the Livebook dependency mix.exs, which erases :live_reload
+config :livebook, LivebookWeb.Endpoint, live_reload: []
+
 # Configure MIME types for SSE
 config :mime, :types, %{
   "text/event-stream" => ["sse"]
