@@ -65,6 +65,31 @@ defmodule LivebookTools.MCPServer do
                 }
               }
             }
+          },
+          %{
+            name: "sync_livebook",
+            description: """
+            Syncs an open Livebook session with its livemd file.
+
+            Call this once you have finished editing a livemd file that is open in Livebook, so the changes show up in Livebook. Don't edit the file while this tool is running; it returns once Livebook has saved the synced notebook, after which the file can be edited again.
+            """,
+            inputSchema: %{
+              type: "object",
+              required: ["file_path"],
+              properties: %{
+                file_path: %{
+                  type: "string",
+                  description:
+                    "The absolute path to the livemd file for the Livebook, it must be a full path like /Users/thomas/path/to/file.livemd"
+                },
+                rerun: %{
+                  type: "string",
+                  enum: ["none", "all", "changed"],
+                  description:
+                    "Which cells to re-run after syncing: none (default), all, or only changed cells and their dependents"
+                }
+              }
+            }
           }
         ]
       }
@@ -151,6 +176,49 @@ defmodule LivebookTools.MCPServer do
             code: -32601,
             message: inspect(reason),
             data: %{name: "fetch_livemd_outputs"}
+          }
+        })
+    end
+  end
+
+  defp handle_tool_call(request_id, %{
+         "name" => "sync_livebook",
+         "arguments" => %{"file_path" => file_path} = arguments
+       }) do
+    rerun_mode =
+      case arguments["rerun"] do
+        "all" -> :all
+        "changed" -> :changed
+        _ -> :none
+      end
+
+    with {:ok, livebook_node} <- LivebookTools.Sync.discover_livebook_node(),
+         true <- Node.connect(livebook_node),
+         {:ok, livebook_pid} <-
+           LivebookTools.Sync.find_livebook_session_pid_for_file(livebook_node, file_path) do
+      changed_ids = LivebookTools.Sync.sync_and_rerun(livebook_pid, file_path, rerun_mode)
+
+      reply(%{
+        jsonrpc: "2.0",
+        id: request_id,
+        result: %{
+          content: [
+            %{
+              type: "text",
+              text: "Synced #{file_path} (#{length(changed_ids)} cells changed)"
+            }
+          ]
+        }
+      })
+    else
+      {:error, reason} ->
+        reply(%{
+          jsonrpc: "2.0",
+          id: request_id,
+          error: %{
+            code: -32601,
+            message: inspect(reason),
+            data: %{name: "sync_livebook"}
           }
         })
     end

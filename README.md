@@ -54,6 +54,22 @@ For more information on MCP works with Cursor, check out the [Cursor MCP docs](h
 ![Cursor Create MCP Server](./assets/cursor-create-mcp-server.png)
 ![Cursor MCP Server Connected](./assets/cursor-mcp-server.png)
 
+Don't set `ERL_FLAGS="-name ..."` for the MCP server: it starts distribution before the escript is loaded, so the VM crashes on boot. Livebook Tools names its own node.
+
+## Syncing edits to Livebook
+
+`livebook_tools watch <file>` syncs an open Livebook session whenever the file changes, once the file has stopped changing for half a second.
+
+After syncing, Livebook saves the notebook back to the file, and anything written to the file in the meantime is overwritten.
+To rule this out, have the agent sync explicitly once it has finished editing, instead of running `watch`:
+
+```bash
+livebook_tools sync <file> [--rerun | --rerun-changed]
+```
+
+`sync` returns only after Livebook has saved the notebook, so the file can be edited again right away.
+The MCP server offers the same as the `sync_livebook` tool.
+
 
 ## Useful Tips
 

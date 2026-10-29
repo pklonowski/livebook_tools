@@ -192,6 +192,22 @@ defmodule LivebookTools.Sync do
     |> Enum.reverse()
   end
 
+  @doc """
+  Syncs the session from its file, then re-runs cells according to
+  `rerun_mode` (`:none`, `:all` or `:changed`).
+  """
+  def sync_and_rerun(livebook_pid, file_path, rerun_mode) do
+    changed_ids = sync(livebook_pid, file_path)
+
+    case rerun_mode do
+      :all -> Livebook.Session.queue_full_evaluation(livebook_pid, [])
+      :changed -> Livebook.Session.queue_full_evaluation(livebook_pid, changed_ids)
+      :none -> :ok
+    end
+
+    changed_ids
+  end
+
   def sync(livebook_pid, file_path) do
     if native_sync_available?(livebook_pid) do
       native_sync(livebook_pid)
@@ -217,9 +233,33 @@ defmodule LivebookTools.Sync do
     # :sys.get_state is processed after the cast, so we see the synced state
     sources_after = cell_sources(livebook_pid)
 
+    # After syncing, Livebook autosaves the notebook as it read it, which
+    # overwrites any write made to the file in the meantime. Returning
+    # only once the save finished means the file can be edited again
+    # right away.
+    wait_for_save(livebook_pid)
+
     for {cell_id, source} <- sources_after,
         Map.get(sources_before, cell_id) != source,
         do: cell_id
+  end
+
+  @save_timeout 15_000
+
+  defp wait_for_save(livebook_pid, waited \\ 0) do
+    saving? = :sys.get_state(livebook_pid) |> Map.get(:save_task_ref) != nil
+
+    cond do
+      not saving? ->
+        :ok
+
+      waited >= @save_timeout ->
+        {:error, :save_timeout}
+
+      true ->
+        Process.sleep(50)
+        wait_for_save(livebook_pid, waited + 50)
+    end
   end
 
   defp cell_sources(livebook_pid) do

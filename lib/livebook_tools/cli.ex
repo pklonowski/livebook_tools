@@ -38,11 +38,7 @@ defmodule LivebookTools.CLI do
         end
 
       {_, ["watch" | rest]} ->
-        {watch_opts, watch_args, _} =
-          OptionParser.parse(rest,
-            strict: [rerun: :boolean, rerun_changed: :boolean],
-            aliases: [r: :rerun]
-          )
+        {watch_opts, watch_args, _} = parse_rerun_opts(rest)
 
         case watch_args do
           [file_path] ->
@@ -54,6 +50,22 @@ defmodule LivebookTools.CLI do
 
           _ ->
             IO.write(:stderr, "Error: Too many arguments for watch command\n\n")
+            print_help()
+        end
+
+      {_, ["sync" | rest]} ->
+        {sync_opts, sync_args, _} = parse_rerun_opts(rest)
+
+        case sync_args do
+          [file_path] ->
+            sync(file_path, sync_opts)
+
+          [] ->
+            IO.write(:stderr, "Error: Missing file path for sync command\n\n")
+            print_help()
+
+          _ ->
+            IO.write(:stderr, "Error: Too many arguments for sync command\n\n")
             print_help()
         end
 
@@ -152,12 +164,7 @@ defmodule LivebookTools.CLI do
     ensure_node_started()
     file_path = Path.expand(file_path)
 
-    rerun_mode =
-      cond do
-        Keyword.get(opts, :rerun, false) -> :all
-        Keyword.get(opts, :rerun_changed, false) -> :changed
-        true -> :none
-      end
+    rerun_mode = rerun_mode(opts)
 
     # Make sure that we can connect to the Livebook session for this file, will exit if not
     with_livebook_session(file_path, fn _livebook_pid ->
@@ -170,17 +177,26 @@ defmodule LivebookTools.CLI do
       Logger.info("File #{file_path} changed, syncing...")
 
       with_livebook_session(file_path, fn livebook_pid ->
-        changed_ids = LivebookTools.Sync.sync(livebook_pid, file_path)
-
-        case rerun_mode do
-          :all -> Livebook.Session.queue_full_evaluation(livebook_pid, [])
-          :changed -> Livebook.Session.queue_full_evaluation(livebook_pid, changed_ids)
-          :none -> :ok
-        end
+        LivebookTools.Sync.sync_and_rerun(livebook_pid, file_path, rerun_mode)
       end)
     end)
 
     :timer.sleep(:infinity)
+  end
+
+  @doc """
+  Syncs an open Livebook session with its file once, returning after
+  Livebook has saved the synced notebook, so the file can be edited again.
+  """
+  def sync(file_path, opts \\ []) do
+    ensure_node_started()
+    file_path = Path.expand(file_path)
+    rerun_mode = rerun_mode(opts)
+
+    with_livebook_session(file_path, fn livebook_pid ->
+      changed_ids = LivebookTools.Sync.sync_and_rerun(livebook_pid, file_path, rerun_mode)
+      IO.write("Synced #{file_path} (#{length(changed_ids)} cells changed)\n")
+    end)
   end
 
   @doc """
@@ -238,6 +254,21 @@ defmodule LivebookTools.CLI do
   ############################################################
   ##                        HELPERS                         ##
   ############################################################
+
+  defp parse_rerun_opts(args) do
+    OptionParser.parse(args,
+      strict: [rerun: :boolean, rerun_changed: :boolean],
+      aliases: [r: :rerun]
+    )
+  end
+
+  defp rerun_mode(opts) do
+    cond do
+      Keyword.get(opts, :rerun, false) -> :all
+      Keyword.get(opts, :rerun_changed, false) -> :changed
+      true -> :none
+    end
+  end
 
   defp ensure_node_started do
     # Only start if not already distributed
@@ -359,6 +390,9 @@ defmodule LivebookTools.CLI do
                                 Watch a Livebook file for changes and sync with open Livebook session
                                 --rerun (-r):        re-run all cells after each sync
                                 --rerun-changed:     re-run only changed cells (and their dependents)
+      sync <file> [--rerun | --rerun-changed]
+                                Sync an open Livebook session with its file once, e.g. after an
+                                agent finishes editing; returns once Livebook has saved the notebook
       run <file> [args]         Convert a Livebook file to an Elixir script and run it
       convert <input> <output>  Convert a Livebook file to an Elixir script and save it to the specified location
       mcp_server                Start the MCP server running over STDIO
